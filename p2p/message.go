@@ -7,4 +7,5 @@ import "net"
 type Message struct{
  	From net.Addr 
 	Payload []byte
+	Peer Peer  // NOTE: either we can put the peer on Message get every time from swarm manger for the application but we need to lock and unlock again and again it will decrease performance  
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"sync"
 )
 
 // TCPPeer represents the remote node over a TCP established connection
@@ -13,25 +12,34 @@ type TCPPeer struct{
 // if we dial and retrive a conn => outbound == true
 // of we accpect and retrive a conn => outbound == false
 	outbound bool
+	encoder Encoder
 }
 
-func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer{
+func NewTCPPeer(conn net.Conn, outbound bool, encoder Encoder) *TCPPeer{
 	return &TCPPeer{
 		conn: conn,
 		outbound: outbound,
+		encoder: encoder,
 	}
 }
 
-// Close() implements Peer Interface 
 func (p *TCPPeer) Close() error {
 	return  p.conn.Close()
+}
+
+func (p *TCPPeer) RemoteAddr() net.Addr{
+	return p.conn.RemoteAddr()
+}
+
+func (p *TCPPeer) Send(payload []byte) error {
+	return p.encoder.Encode(p.conn, payload)
 }
 
 type TCPTransportOpts struct{
 	ListenAddr string
 	HandshakeFunc HandshakeFunc
 	Decoder Decoder
-	OnPeer func(Peer) error // a function for doing processing on peer
+	Encoder Encoder
 }
 
 
@@ -39,11 +47,18 @@ type TCPTransport struct {
 	TCPTransportOpts
 	listner net.Listener
 	msgch chan Message
-
-	mu sync.RWMutex
+	OnPeer func(Peer) error // a function for doing processing on peer
 }
 
 func NewTcpTransport(opts TCPTransportOpts) *TCPTransport {
+	if opts.Decoder == nil {
+		opts.Decoder = DefaultDecoder{}
+	}
+	
+	// Fallback to DefaultEncoder if application didn't provide one
+	if opts.Encoder == nil {
+		opts.Encoder = DefaultEncoder{}
+	}
 
 	return &TCPTransport{
 		TCPTransportOpts: opts,
@@ -75,12 +90,20 @@ func (t *TCPTransport) startAcceptLoop(){
 			fmt.Printf("Tcp accpect error: %s\n", err)
 		}
 
-		go t.handleConn(conn)
+		go t.handleConn(conn,false)
 	}
 }
 
+func (t *TCPTransport) Dial(adrr string) error{
+	conn , err := net.Dial("tcp",adrr)
+	if err != nil {
+		return err
+	}
+go  t.handleConn(conn, true)
+	return nil
+}
 
-func (t* TCPTransport) handleConn(conn net.Conn){
+func (t* TCPTransport) handleConn(conn net.Conn, outbound bool){
 	var err error
 
 	defer func ()  {
@@ -93,7 +116,7 @@ func (t* TCPTransport) handleConn(conn net.Conn){
 		}
 	}()
 
-	peer := NewTCPPeer(conn, false)
+	peer := NewTCPPeer(conn, outbound, t.Encoder)
 
 	if err = t.HandshakeFunc(peer); err != nil {
 		return
@@ -112,6 +135,11 @@ func (t* TCPTransport) handleConn(conn net.Conn){
 		}
 		
 		msg.From = conn.RemoteAddr()
+		msg.Peer = peer
 		t.msgch <- msg
 	} 
+}
+
+func (t *TCPTransport) SetOnPeer(fn func(Peer) error) {
+	t.OnPeer = fn
 }
