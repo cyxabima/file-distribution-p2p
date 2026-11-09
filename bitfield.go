@@ -13,6 +13,15 @@ type Bitfield struct{
 	mu sync.RWMutex
 }
 
+
+func NewBitfield(totalChunks uint32) *Bitfield{
+	// classic celing method
+	numBytes := (totalChunks + 7) / 8
+	return &Bitfield{
+	data: make([]byte,numBytes),
+	}
+}
+
 func (bf *Bitfield) Has(index uint32) bool  {
 	bf.mu.RLock()
 	defer bf.mu.RUnlock()
