@@ -5,8 +5,6 @@ import (
 	"crypto/sha256"
 )
 
-
-
 type DataVerifier struct{
 
 	// holds the hash of each chunck; is 32 byte sha256 hash
