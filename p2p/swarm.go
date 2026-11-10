@@ -63,7 +63,7 @@ func (sm *SwarmManager) Broadcast(payload []byte){
 
 func (sm *SwarmManager) Start(){
 	// Start the background listening loop
-	go sm.Transport.ListenAndAccpet()
+	go sm.Transport.ListenAndAccept()
 
 	for msg := range sm.Transport.Consume() {
 		if err:= sm.OnMessage(msg) ; err != nil {

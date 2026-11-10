@@ -13,9 +13,8 @@ type Peer interface{
 // between the nodes in network. this can be of the 
 // from (TCP, UDP webSockets, ...)
 type Transport interface{
-	ListenAndAccpet() error
+	ListenAndAccept() error
 	Dial(string) error
-	OnPeer (Peer) error // a function for doing processing on peer
 	Consume() <- chan Message
 	SetOnPeer(func(Peer) error)
 }
