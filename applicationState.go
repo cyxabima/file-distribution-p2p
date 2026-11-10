@@ -51,3 +51,55 @@ func (s *ApplicationState) SweepTimeouts(timeout time.Duration){
 		}	
 	}
 }
+
+func (s *ApplicationState) FindNextRequest(totalChunks uint32) (uint32, net.Addr, bool){
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var bestChunk uint32
+	var bestPeer net.Addr
+	found := false
+
+	// Start with the maximum possible integer
+	minAvailability := int(^uint(0) >> 1)
+
+	for i := uint32(0); i <= totalChunks; i++ {
+		
+		// skip if already have chunk
+		if s.MyBitfiled.Has(i){
+			continue
+		}
+		
+		// skip if already inflight
+		if _, ok := s.inFlight[i] ; ok {
+			continue			
+		}
+
+		// count how many peer have this specific chunk 
+		availability := 0
+		var availablePeer net.Addr
+
+		for addr, peerBf := range s.peerBitfields {
+				if peerBf.Has(i){
+					availability++
+					availablePeer = addr
+				}
+		}
+
+		if availability > 0 && availability < minAvailability {
+			minAvailability = availability
+			bestChunk = i
+			bestPeer = availablePeer
+			found = true
+
+			// cuz we are finding rearest and if availability is 1 it is rearest
+			if availability == 1{
+				break
+			}
+		}
+	}
+
+	return bestChunk, bestPeer, found
+
+}
+
