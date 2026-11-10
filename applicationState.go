@@ -11,6 +11,7 @@ type ApplicationState struct{
 	mu sync.RWMutex
 
 	peerBitfields map[net.Addr]*Bitfield
+	// uint32 here is for chunck index
 	inFlight map[uint32]PendingRequest
 }
 
@@ -39,3 +40,14 @@ func (s *ApplicationState) MakeInFlight(index uint32, addr net.Addr) {
 	}
 }
 
+func (s *ApplicationState) SweepTimeouts(timeout time.Duration){
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	for index, req := range s.inFlight {
+		if now.Sub(req.RequestedAt) > timeout {
+			delete(s.inFlight, index)
+		}	
+	}
+}
