@@ -31,7 +31,7 @@ func (s *ApplicationState) SetPeerBitfields(addr net.Addr, bitfield *Bitfield){
 }
 
 // Mark a chunk as requested so we donot ask for it twice
-func (s *ApplicationState) MakeInFlight(index uint32, addr net.Addr) {
+func (s *ApplicationState) MarkInFlight(index uint32, addr net.Addr) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.inFlight[index] = PendingRequest{
@@ -93,7 +93,7 @@ func (s *ApplicationState) FindNextRequest(totalChunks uint32) (uint32, net.Addr
 			found = true
 
 			// cuz we are finding rearest and if availability is 1 it is rearest
-			if availability == 1{
+			if availability == 1 {
 				break
 			}
 		}
