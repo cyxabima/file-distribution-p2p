@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 )
 
 // TCPPeer represents the remote node over a TCP established connection
@@ -13,6 +14,7 @@ type TCPPeer struct{
 // of we accpect and retrive a conn => outbound == false
 	outbound bool
 	encoder Encoder
+	writeMu  sync.Mutex   // Prevents interleaved frames if two goroutines Send() at once
 }
 
 func NewTCPPeer(conn net.Conn, outbound bool, encoder Encoder) *TCPPeer{
@@ -32,6 +34,9 @@ func (p *TCPPeer) RemoteAddr() net.Addr{
 }
 
 func (p *TCPPeer) Send(payload []byte) error {
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+
 	return p.encoder.Encode(p.conn, payload)
 }
 
@@ -99,7 +104,7 @@ func (t *TCPTransport) Dial(adrr string) error{
 	if err != nil {
 		return err
 	}
-go  t.handleConn(conn, true)
+	go  t.handleConn(conn, true)
 	return nil
 }
 
@@ -109,10 +114,10 @@ func (t* TCPTransport) handleConn(conn net.Conn, outbound bool){
 	defer func ()  {
 		conn.Close()
 		// this could be done in there respected if block btw
-		if err != nil && err != io.EOF{
-		fmt.Printf("Connection closed with error: %v\n", err)
+		if err != nil && err != io.EOF {
+			fmt.Printf("Connection closed with error: %v\n", err)
 		}else{
-		fmt.Printf("Peer is Disconnected Gracefully for %s\n", conn.RemoteAddr())
+			fmt.Printf("Peer is Disconnected Gracefully for %s\n", conn.RemoteAddr())
 		}
 	}()
 
@@ -122,7 +127,7 @@ func (t* TCPTransport) handleConn(conn net.Conn, outbound bool){
 		return
 	} 
 	
-	if err = t.OnPeer(peer) ; err!= nil{
+	if err = t.OnPeer(peer) ; err != nil{
 		return
 	}
 
@@ -137,7 +142,7 @@ func (t* TCPTransport) handleConn(conn net.Conn, outbound bool){
 		msg.From = conn.RemoteAddr()
 		msg.Peer = peer
 		t.msgch <- msg
-	} 
+	}
 }
 
 func (t *TCPTransport) SetOnPeer(fn func(Peer) error) {
