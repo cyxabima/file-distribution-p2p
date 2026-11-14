@@ -31,7 +31,9 @@ func NewFileShareApp(listenAddr, filepath string, fileSize int64, chuckSize uint
 
 	transport := p2p.NewTcpTransport(p2p.TCPTransportOpts{
 		ListenAddr: listenAddr,
-		// TODO: Encoder and Decoder functions
+		Encoder: p2p.LengthEncoder{},
+		Decoder: p2p.LengthDecoder{},
+		HandshakeFunc: ProtocolHandshake,
 	})
 
 	app.swarm = p2p.NewSwarmManager(p2p.SwarmManagerOpts{
@@ -193,4 +195,5 @@ func (app *FileShareApp) handlePiece(peer p2p.Peer, data []byte) error {
 }
 
 
-// NOTE : Refactoring Requied as we need to handle multiple file sharing as once for that we need each file blueprint hash as well for session 
+// NOTE : Refactoring Requied as we need to handle multiple file sharing as once for that we need each file blueprint hash as well for session or other things ig 
+// In V1 we are supporting one file at a time this will help us to keep away from session managmnet now 

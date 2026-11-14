@@ -3,8 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io"
-	"net"
+	"github.com/cyxabima/minimal-p2p-library-in-go/p2p"
 )
 
 const (
@@ -16,21 +15,21 @@ const (
 	MsgBlueprint    byte = 0x06
 )
 
-
 var MagicProtocolString = []byte("COMPSTEMS_P2P_V1")
 
-func ProtocolHandshake(conn net.Conn) error {
-	if _, err := conn.Write(MagicProtocolString); err != nil {
+func ProtocolHandshake(peer p2p.Peer) error {
+	dec := p2p.LengthDecoder{}
+	if err := peer.Send(MagicProtocolString); err != nil {
 		return err
 	}
 
-	peerMagic := make([]byte, len(MagicProtocolString))
-	if _, err := io.ReadFull(conn, peerMagic); err != nil {
+	var msg p2p.Message
+	if err := dec.Decode(peer, &msg); err != nil {
 		return err
 	}
 
-	if !bytes.Equal(peerMagic, MagicProtocolString) {
-		return fmt.Errorf("invalid handshake: unrecognized protocol")
+	if !bytes.Equal(msg.Payload, MagicProtocolString) {
+		return fmt.Errorf("invalid protocol handshake from %s", peer.RemoteAddr())
 	}
 
 	return nil
