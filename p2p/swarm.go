@@ -55,6 +55,10 @@ func (sm *SwarmManager) handlePeerDisconnect(addr net.Addr) {
 	}
 }
 
+func (sm *SwarmManager) Dial(addr string) error {
+	return sm.Transport.Dial(addr)
+}
+
 func (sm *SwarmManager) GetPeer(addr net.Addr) (Peer, bool){
 	peer, ok := sm.peers[addr]
 	if !ok{

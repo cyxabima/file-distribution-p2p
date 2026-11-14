@@ -82,8 +82,8 @@ func (app *FileShareApp) OnPeerConnect(peer p2p.Peer) error{
 	state := app.state
 	app.mu.RUnlock()
 
-	// If we are a fresh leecher who hasn't downloaded the .p2p blueprint yet,
-	// we don't have a bitfield to send yet do nothing as handleBlueprint will send it later.
+	// If we are a fresh leecher who hasn't downloaded the .p2p blueprint yet
+	// we donot have a bitfield to send yet do nothing as handleBlueprint will send it later.
 	if state == nil {
 		return nil
 	}

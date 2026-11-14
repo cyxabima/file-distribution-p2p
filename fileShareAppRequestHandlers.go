@@ -109,7 +109,7 @@ func (app *FileShareApp) sendBitfield(peer p2p.Peer) error {
 	app.mu.RLock()
 	defer app.mu.RUnlock()
 
-	// TODO: GURAD if we havenot loaded a .p2p blueprint yet, we have no bitfield to send
+	// GURAD if we havenot loaded a .p2p blueprint yet, we have no bitfield to send
 	if app.state == nil {
 		return nil
 	}
