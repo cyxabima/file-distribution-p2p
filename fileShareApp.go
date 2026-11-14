@@ -77,14 +77,27 @@ func (app *FileShareApp) onMessage(msg p2p.Message) error {
 	}
 }
 
-// TODO:
 func (app *FileShareApp) OnPeerConnect(peer p2p.Peer) error{
-	return nil
-}
+	app.mu.RLock()
+	state := app.state
+	app.mu.RUnlock()
 
-//TODO:
+	// If we are a fresh leecher who hasn't downloaded the .p2p blueprint yet,
+	// we don't have a bitfield to send yet do nothing as handleBlueprint will send it later.
+	if state == nil {
+		return nil
+	}
+
+	return app.sendBitfield(peer)}
+
+//we need this as swarm manager can not update app state
 func (app *FileShareApp) OnPeerDisconnect(addr net.Addr){
-	
+	app.mu.RLock()
+	state := app.state
+	app.mu.RUnlock()
+	 if state != nil{
+	 state.RemovePeer(addr)
+	 }
 }
 
 func (app *FileShareApp) StartRequestEngine(totalChunks uint32) {
