@@ -7,19 +7,21 @@ import (
 )
 
 type ApplicationState struct {
-	MyBitfiled *Bitfield
+	MyBitfield *Bitfield
 	mu         sync.RWMutex
 
 	peerBitfields map[net.Addr]*Bitfield
+	bitfieldSent  map[string]bool
 	// uint32 here is for chunck index
 	inFlight map[uint32]PendingRequest
 }
 
 func NewApplicationState(totalChunks uint32) *ApplicationState {
 	return &ApplicationState{
-		MyBitfiled:    NewBitfield(totalChunks),
+		MyBitfield:    NewBitfield(totalChunks),
 		peerBitfields: make(map[net.Addr]*Bitfield),
 		inFlight:      make(map[uint32]PendingRequest),
+		bitfieldSent:  make(map[string]bool),
 	}
 }
 
@@ -42,6 +44,18 @@ func (s *ApplicationState) MarkInFlight(index uint32, addr net.Addr) {
 func (s *ApplicationState) ClearInFlight(index uint32) {
 	// TODO: error handling here
 	delete(s.inFlight, index)
+}
+
+func (s *ApplicationState) MarkBitfieldSent(addr net.Addr) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bitfieldSent[addr.String()] = true
+}
+
+func (s *ApplicationState) HasSentBitfield(addr net.Addr) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.bitfieldSent[addr.String()]
 }
 
 func (s *ApplicationState) SweepTimeouts(timeout time.Duration) {
@@ -70,7 +84,7 @@ func (s *ApplicationState) FindNextRequest(totalChunks uint32) (uint32, net.Addr
 	for i := uint32(0); i <= totalChunks; i++ {
 
 		// skip if already have chunk
-		if s.MyBitfiled.Has(i) {
+		if s.MyBitfield.Has(i) {
 			continue
 		}
 
