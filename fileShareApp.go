@@ -104,21 +104,72 @@ func (app *FileShareApp) onMessage(msg p2p.Message) error {
 	default:
 		return fmt.Errorf("unknown message ID: %x", msgID)
 	}
-
 }
 
+// handleBitfield processes the initial state dump from a new peer
 func (app *FileShareApp) handleBitfield(peer p2p.Peer, data []byte) error {
+	peerBf := &Bitfield{
+		data: make([]byte, len(data)),
+	}
+	copy(peerBf.data, data)
+	app.state.SetPeerBitfields(peer.RemoteAddr(), peerBf)
+
 	return nil
 }
 
 func (app *FileShareApp) handleHave(peer p2p.Peer, data []byte) error {
+	if len(data) < 4 {
+		return fmt.Errorf("invalid MsgHave payload")
+	}
+
+	chunkIndex := binary.BigEndian.Uint32(data)
+
+	// updating the bitfiled of the peer
+	app.state.mu.Lock()
+	defer app.state.mu.Unlock()
+
+	if peerBf, exists := app.state.peerBitfields[peer.RemoteAddr()]; exists {
+		peerBf.Set(chunkIndex)
+	}
+
 	return nil
 }
 
 func (app *FileShareApp) handleRequest(peer p2p.Peer, data []byte) error {
+	if len(data) < 4 {
+		return fmt.Errorf("invalid MsgRequest payload")
+	}
+
 	return nil
 }
 
+// handlePiece processes the actual file data sent by a peer
 func (app *FileShareApp) handlePiece(peer p2p.Peer, data []byte) error {
+	if len(data) < 4 {
+		return fmt.Errorf("invalid MsgPiece payload")
+	}
+	chunkIndex := binary.BigEndian.Uint32(data[:4])
+	rawData := data[4:]
+
+	if !app.verifier.Verify(chunkIndex, rawData) {
+		app.state.ClearInFlight(chunkIndex)
+		peer.Close() // disconnect the bad actor
+		return fmt.Errorf("chunk %d failed SHA-256 verification", chunkIndex)
+	}
+
+	if err := app.disk.WriteChunk(chunkIndex, rawData); err != nil {
+		app.state.ClearInFlight(chunkIndex)
+		return fmt.Errorf("disk write failed: %v", err)
+	}
+
+	app.state.MyBitfiled.Set(chunkIndex)
+	app.state.ClearInFlight(chunkIndex)
+
+	// Most Import broadcast to eveyone that i have now this chuck
+	havePayload := make([]byte, 5)
+	havePayload[0] = MsgHave
+	binary.BigEndian.PutUint32(havePayload[1:], chunkIndex)
+	app.swarm.Broadcast(havePayload)
+
 	return nil
 }

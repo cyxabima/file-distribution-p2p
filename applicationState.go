@@ -39,6 +39,10 @@ func (s *ApplicationState) MarkInFlight(index uint32, addr net.Addr) {
 		RequestedAt: time.Now(),
 	}
 }
+func (s *ApplicationState) ClearInFlight(index uint32) {
+	// TODO: error handling here
+	delete(s.inFlight, index)
+}
 
 func (s *ApplicationState) SweepTimeouts(timeout time.Duration) {
 	s.mu.Lock()
