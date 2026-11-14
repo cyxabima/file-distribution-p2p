@@ -120,3 +120,11 @@ func (s *ApplicationState) FindNextRequest(totalChunks uint32) (uint32, net.Addr
 	return bestChunk, bestPeer, found
 
 }
+
+func (s *ApplicationState) RemovePeer(addr net.Addr) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.peerBitfields, addr)
+	delete(s.bitfieldSent, addr.String())
+}

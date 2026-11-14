@@ -39,6 +39,9 @@ func (sm *SwarmManager) handleNewPeer(peer Peer) error{
 
 	sm.peers[peer.RemoteAddr()] = peer
 	fmt.Printf("Swarm added new peer: %s\n", peer.RemoteAddr())
+	if sm.OnPeerConnect != nil{
+		return sm.OnPeerConnect(peer)
+	}
 	return nil
 }
 
