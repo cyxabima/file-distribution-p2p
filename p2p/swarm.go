@@ -10,7 +10,9 @@ import (
 type SwarmManagerOpts struct {
 	Transport Transport
 	OnMessage func(Message) error
-	
+	// these two function so that application can do what ever it wnat
+	OnPeerConnect    func(Peer) error
+	OnPeerDisconnect func(net.Addr)
 }
 
 type SwarmManager struct{
@@ -26,9 +28,9 @@ func NewSwarmManager(opts SwarmManagerOpts) *SwarmManager {
 	}
 
 	// use this call back to connect SwarmManager to Transport
-	sw.Transport.SetOnPeer(sw.handleNewPeer) 
-
-	return sw 
+	sw.Transport.SetOnPeer(sw.handleNewPeer)
+	sw.Transport.SetOnPeerDisconnect(sw.handlePeerDisconnect)
+	return sw
 }
 
 func (sm *SwarmManager) handleNewPeer(peer Peer) error{
@@ -40,8 +42,17 @@ func (sm *SwarmManager) handleNewPeer(peer Peer) error{
 	return nil
 }
 
+func (sm *SwarmManager) handlePeerDisconnect(addr net.Addr) {
+	sm.peerLock.Lock()
+	defer sm.peerLock.Unlock()
+	delete(sm.peers, addr)
+
+	if sm.OnPeerDisconnect != nil {
+		sm.OnPeerDisconnect(addr)
+	}
+}
+
 func (sm *SwarmManager) GetPeer(addr net.Addr) (Peer, bool){
-	
 	peer, ok := sm.peers[addr]
 	if !ok{
 		return nil, false

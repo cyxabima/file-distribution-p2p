@@ -57,6 +57,7 @@ type TCPTransport struct {
 	listner net.Listener
 	msgch chan Message
 	OnPeer func(Peer) error // a function for doing processing on peer
+	OnPeerDisconnect func(net.Addr)
 }
 
 func NewTcpTransport(opts TCPTransportOpts) *TCPTransport {
@@ -115,9 +116,13 @@ func (t *TCPTransport) Dial(adrr string) error{
 
 func (t* TCPTransport) handleConn(conn net.Conn, outbound bool){
 	var err error
+	remoteAddr := conn.RemoteAddr()
 
 	defer func ()  {
 		conn.Close()
+		if t.OnPeerDisconnect != nil {
+			t.OnPeerDisconnect(remoteAddr) // Notifies SwarmManager
+		}
 		// this could be done in there respected if block btw
 		if err != nil && err != io.EOF {
 			fmt.Printf("Connection closed with error: %v\n", err)
@@ -150,6 +155,11 @@ func (t* TCPTransport) handleConn(conn net.Conn, outbound bool){
 	}
 }
 
+// there Two Fuctions are there so that swarm manger set the values these attributes
 func (t *TCPTransport) SetOnPeer(fn func(Peer) error) {
 	t.OnPeer = fn
+}
+
+func (t *TCPTransport) SetOnPeerDisconnect(fn func(net.Addr)) {
+	t.OnPeerDisconnect = fn
 }
