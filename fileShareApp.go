@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"time"
 
 	"github.com/cyxabima/minimal-p2p-library-in-go/p2p"
@@ -82,6 +83,42 @@ func (app *FileShareApp) StartRequestEngine(totalChunks uint32) {
 	}
 }
 
-func (app *FileShareApp) onMessage(p2p.Message) error {
+// OnMessage is called by the SwarmManager whenever a complete message arrives
+func (app *FileShareApp) onMessage(msg p2p.Message) error {
+	if len(msg.Payload) == 0 {
+		return nil
+	}
+
+	msgID := msg.Payload[0]
+	data := msg.Payload[1:]
+
+	switch msgID {
+	case MsgBitfield:
+		return app.handleBitfield(msg.Peer, data)
+	case MsgHave:
+		return app.handleHave(msg.Peer, data)
+	case MsgRequest:
+		return app.handleRequest(msg.Peer, data)
+	case MsgPiece:
+		return app.handlePiece(msg.Peer, data)
+	default:
+		return fmt.Errorf("unknown message ID: %x", msgID)
+	}
+
+}
+
+func (app *FileShareApp) handleBitfield(peer p2p.Peer, data []byte) error {
+	return nil
+}
+
+func (app *FileShareApp) handleHave(peer p2p.Peer, data []byte) error {
+	return nil
+}
+
+func (app *FileShareApp) handleRequest(peer p2p.Peer, data []byte) error {
+	return nil
+}
+
+func (app *FileShareApp) handlePiece(peer p2p.Peer, data []byte) error {
 	return nil
 }
