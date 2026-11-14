@@ -139,8 +139,25 @@ func (app *FileShareApp) handleRequest(peer p2p.Peer, data []byte) error {
 	if len(data) < 4 {
 		return fmt.Errorf("invalid MsgRequest payload")
 	}
+	chunkIndex := binary.BigEndian.Uint32(data)
 
-	return nil
+	if !app.state.MyBitfiled.Has(chunkIndex){
+		return nil
+	}
+
+	chunkData, err := app.disk.ReadChunk(chunkIndex)
+	
+	if err != nil {
+		return fmt.Errorf("disk read failed: %v", err)
+	}
+
+	// Construct and send MsgPiece
+	payload := make([]byte, 1+4+len(chunkData))
+	payload[0] = MsgPiece
+	binary.BigEndian.PutUint32(payload[1:5], chunkIndex)
+	copy(payload[5:], chunkData)
+
+	return peer.Send(payload)
 }
 
 // handlePiece processes the actual file data sent by a peer
@@ -148,6 +165,7 @@ func (app *FileShareApp) handlePiece(peer p2p.Peer, data []byte) error {
 	if len(data) < 4 {
 		return fmt.Errorf("invalid MsgPiece payload")
 	}
+
 	chunkIndex := binary.BigEndian.Uint32(data[:4])
 	rawData := data[4:]
 
@@ -173,3 +191,6 @@ func (app *FileShareApp) handlePiece(peer p2p.Peer, data []byte) error {
 
 	return nil
 }
+
+
+// NOTE : Refactoring Requied as we need to handle multiple file sharing as once for that we need each file blueprint hash as well for session 
