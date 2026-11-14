@@ -21,4 +21,5 @@ type Transport interface{
 	Dial(string) error
 	Consume() <- chan Message
 	SetOnPeer(func(Peer) error)
+	SetOnPeerDisconnect(func(net.Addr))
 }
