@@ -53,8 +53,8 @@ func (e DefaultEncoder) Encode(w io.Writer, payload []byte) error {
 
 type LengthEncoder struct{}
 
-func (e LengthEncoder) Encode(w io.Writer, msg Message) error {
-	payloadLen := uint32(len(msg.Payload))
+func (e LengthEncoder) Encode(w io.Writer, payload []byte) error {
+	payloadLen := uint32(len(payload))
 
 	lenBuf := make([]byte, 4)
 	binary.BigEndian.PutUint32(lenBuf, payloadLen)
@@ -62,7 +62,7 @@ func (e LengthEncoder) Encode(w io.Writer, msg Message) error {
 	if _, err := w.Write(lenBuf); err != nil {
 		return err
 	}
-	_, err := w.Write(msg.Payload)
+	_, err := w.Write(payload)
 	return err
 }
 
@@ -76,7 +76,7 @@ func (d LengthDecoder) Decode(r io.Reader, msg *Message) error {
 	}
 	payloadLen := binary.BigEndian.Uint32(lenBuf)
 
-	// we may add a max size check here to prevent memory exhaustion attacks but for now skipping
+	// NOTE: we may add a max size check here to prevent memory exhaustion attacks but for now skipping
 	msg.Payload = make([]byte, payloadLen)
 
 	_, err := io.ReadFull(r, msg.Payload)

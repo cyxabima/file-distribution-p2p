@@ -40,6 +40,10 @@ func (p *TCPPeer) Send(payload []byte) error {
 	return p.encoder.Encode(p.conn, payload)
 }
 
+func (p *TCPPeer) Read(b []byte) (int, error) {
+	return p.conn.Read(b)
+}
+
 type TCPTransportOpts struct{
 	ListenAddr string
 	HandshakeFunc HandshakeFunc
@@ -93,6 +97,7 @@ func (t *TCPTransport) startAcceptLoop(){
 		conn, err := t.listner.Accept()
 		if err != nil {
 			fmt.Printf("Tcp accpect error: %s\n", err)
+			continue
 		}
 
 		go t.handleConn(conn,false)
@@ -125,7 +130,7 @@ func (t* TCPTransport) handleConn(conn net.Conn, outbound bool){
 
 	if err = t.HandshakeFunc(peer); err != nil {
 		return
-	} 
+	}
 	
 	if err = t.OnPeer(peer) ; err != nil{
 		return
@@ -135,7 +140,7 @@ func (t* TCPTransport) handleConn(conn net.Conn, outbound bool){
 	msg := Message{}
 	for{
 
-		if err := t.Decoder.Decode(conn, &msg); err != nil{
+		if err = t.Decoder.Decode(conn, &msg); err != nil{
 			return
 		}
 		
