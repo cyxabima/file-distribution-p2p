@@ -2,83 +2,89 @@ package p2p
 
 import (
 	"encoding/binary"
-	"encoding/gob"
+	"errors"
+	"fmt"
 	"io"
 )
 
+const DefaultMaxMessageSize uint32 = 4 << 20 // 4 MiB
+
+var (
+	ErrMessageTooLarge = errors.New("p2p: message exceeds max size")
+	// ErrKeepAlive is returned by a Decoder for a zero-length frame. It is
+	// transport bookkeeping, not an error condition: the read loop resets its
+	// deadline and keeps going without emitting a Message.
+	ErrKeepAlive = errors.New("p2p: keep-alive frame")
+)
+
+type Encoder interface {
+	Encode(w io.Writer, payload []byte) error
+}
+
 type Decoder interface {
-	Decode(io.Reader, *Message) error
+	Decode(r io.Reader) ([]byte, error)
 }
 
-type Encoder interface{
-	Encode(io.Writer, []byte) error
+
+type LengthEncoder struct {
+	MaxMessageSize uint32
 }
 
-type  GOBDecoder struct{}
-
-func (dec GOBDecoder) Decode( r io.Reader, msg *Message) error {
-	return  gob.NewDecoder(r).Decode(msg)
-}
-
-type DefaultDecoder struct{}
-
-func (dec DefaultDecoder) Decode(r io.Reader, msg *Message) error{
-
-	buff := make([]byte, 1028)
-	n, err := r.Read(buff)
-	if err != nil{
-		return err
+func (e LengthEncoder) max() uint32 {
+	if e.MaxMessageSize == 0 {
+		return DefaultMaxMessageSize
 	}
-
-	msg.Payload = buff[:n]
-	return  nil
-
+	return e.MaxMessageSize
 }
-
-
-type DefaultEncoder struct{}
-
-func (e DefaultEncoder) Encode(w io.Writer, payload []byte) error {
-	// Write the 4-byte length prefix
-	length := uint32(len(payload))
-	if err := binary.Write(w, binary.BigEndian, length); err != nil {
-		return err
-	}
-	
-	// Write the actual raw payload
-	_, err := w.Write(payload)
-	return err
-}
-
-
-type LengthEncoder struct{}
 
 func (e LengthEncoder) Encode(w io.Writer, payload []byte) error {
-	payloadLen := uint32(len(payload))
+	if uint32(len(payload)) > e.max() {
+		return fmt.Errorf("%w: %d bytes", ErrMessageTooLarge, len(payload))
+	}
 
-	lenBuf := make([]byte, 4)
-	binary.BigEndian.PutUint32(lenBuf, payloadLen)
+	var hdr [4]byte
+	binary.BigEndian.PutUint32(hdr[:], uint32(len(payload)))
 
-	if _, err := w.Write(lenBuf); err != nil {
+	if _, err := w.Write(hdr[:]); err != nil {
 		return err
 	}
+	if len(payload) == 0 {
+		return nil
+	}
+
 	_, err := w.Write(payload)
 	return err
 }
 
+type LengthDecoder struct {
+	MaxMessageSize uint32
+}
 
-type LengthDecoder struct{}
-
-func (d LengthDecoder) Decode(r io.Reader, msg *Message) error {
-	lenBuf := make([]byte, 4)
-	if _, err := io.ReadFull(r, lenBuf); err != nil {
-		return err
+func (d LengthDecoder) max() uint32 {
+	if d.MaxMessageSize == 0 {
+		return DefaultMaxMessageSize
 	}
-	payloadLen := binary.BigEndian.Uint32(lenBuf)
+	return d.MaxMessageSize
+}
 
-	// NOTE: we may add a max size check here to prevent memory exhaustion attacks but for now skipping
-	msg.Payload = make([]byte, payloadLen)
+func (d LengthDecoder) Decode(r io.Reader) ([]byte, error) {
+	var hdr [4]byte
+	if _, err := io.ReadFull(r, hdr[:]); err != nil {
+		return nil, err
+	}
 
-	_, err := io.ReadFull(r, msg.Payload)
-	return err
+	n := binary.BigEndian.Uint32(hdr[:])
+	if n == 0 {
+		return nil, ErrKeepAlive
+	}
+
+	if n > d.max() {
+		return nil, fmt.Errorf("%w: %d bytes", ErrMessageTooLarge, n)
+	}
+
+	buf := make([]byte, n)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
 }
