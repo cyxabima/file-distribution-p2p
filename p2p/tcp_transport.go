@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -33,7 +34,7 @@ type TCPPeer struct {
 	decoder Decoder
 
 	// writeMu prevents interleaved frames if two goroutines Send at once.
-	writeMu sync.Mutex
+	writeMu      sync.Mutex
 	writeTimeout time.Duration
 }
 
@@ -133,8 +134,24 @@ type TCPTransport struct {
 	closed   bool
 
 	done      chan struct{}
+	stopped   chan struct{}
 	closeOnce sync.Once
 	wg        sync.WaitGroup
+}
+
+// call runs fn and converts a panic into a logged error, so a buggy
+// application callback cannot take down the whole process. It reports whether
+// fn panicked.
+func call(name string, fn func()) (panicked bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			panicked = true
+			log.Printf("p2p: panic in %s: %v\n%s", name, r, debug.Stack())
+		}
+	}()
+
+	fn()
+	return false
 }
 
 func NewTCPTransport(opts TCPTransportOpts) (*TCPTransport, error) {
@@ -150,6 +167,7 @@ func NewTCPTransport(opts TCPTransportOpts) (*TCPTransport, error) {
 		onPeerDisconnect: func(net.Addr) {},
 		conns:            make(map[net.Conn]struct{}),
 		done:             make(chan struct{}),
+		stopped:          make(chan struct{}),
 	}, nil
 }
 
@@ -159,18 +177,35 @@ func (t *TCPTransport) Consume() <-chan Message {
 	return t.msgch
 }
 
+// SetOnPeer installs the callback run for every accepted peer. It is safe to
+// call at any time; a connection already in flight keeps the callbacks it
+// snapshotted when it started.
 func (t *TCPTransport) SetOnPeer(fn func(Peer) error) {
 	if fn == nil {
 		fn = func(Peer) error { return nil }
 	}
+
+	t.mu.Lock()
 	t.onPeer = fn
+	t.mu.Unlock()
 }
 
 func (t *TCPTransport) SetOnPeerDisconnect(fn func(net.Addr)) {
 	if fn == nil {
 		fn = func(net.Addr) {}
 	}
+
+	t.mu.Lock()
 	t.onPeerDisconnect = fn
+	t.mu.Unlock()
+}
+
+// callbacks returns a consistent pair for one connection.
+func (t *TCPTransport) callbacks() (func(Peer) error, func(net.Addr)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	return t.onPeer, t.onPeerDisconnect
 }
 
 // Addr returns the address the transport is listening on, or nil before
@@ -225,8 +260,13 @@ func (t *TCPTransport) Dial(addr string) error {
 	return t.startConn(conn, true)
 }
 
-// Close stops accepting, closes every live connection, waits for the handler
-// goroutines to exit and then closes the Consume channel.
+// Close stops accepting, closes every live connection and signals the
+// background work to stop. It never waits, so it is safe to call from any
+// goroutine — including an OnPeer or OnPeerDisconnect callback. It is
+// idempotent.
+//
+// Use Wait to block until all handlers have exited and Consume has been
+// closed.
 func (t *TCPTransport) Close() error {
 	t.closeOnce.Do(func() {
 		t.mu.Lock()
@@ -246,13 +286,23 @@ func (t *TCPTransport) Close() error {
 			_ = c.Close()
 		}
 
-		// Safe to close msgch: every producer (accept loop and connection
-		// handlers) is registered in wg and has exited by now.
-		t.wg.Wait()
-		close(t.msgch)
+		// Wait off the caller's goroutine: a callback may be the caller, and
+		// that goroutine is itself counted in wg.
+		go func() {
+			t.wg.Wait()
+			// Safe to close msgch: every producer has exited by now.
+			close(t.msgch)
+			close(t.stopped)
+		}()
 	})
 
 	return nil
+}
+
+// Wait blocks until Close has been called, every handler has exited and the
+// Consume channel is closed. Calling Wait without Close blocks forever.
+func (t *TCPTransport) Wait() {
+	<-t.stopped
 }
 
 func (t *TCPTransport) startAcceptLoop(ln net.Listener) {
@@ -305,6 +355,10 @@ func (t *TCPTransport) handleConn(conn net.Conn, outbound bool) {
 	var err error
 	remoteAddr := conn.RemoteAddr()
 
+	// Snapshot the callbacks once so one connection sees a consistent pair
+	// even if the application swaps them while it is running.
+	onPeer, onDisconnect := t.callbacks()
+
 	// accepted is only true once the application has seen the peer, so a
 	// failed handshake or a rejected OnPeer never produces a disconnect event.
 	accepted := false
@@ -314,12 +368,12 @@ func (t *TCPTransport) handleConn(conn net.Conn, outbound bool) {
 		t.untrackConn(conn)
 
 		if accepted {
-			t.onPeerDisconnect(remoteAddr)
+			call("OnPeerDisconnect", func() { onDisconnect(remoteAddr) })
 		}
 
 		switch {
 		case errors.Is(err, io.EOF), errors.Is(err, net.ErrClosed):
-			// TODO: clean shutdown
+			// Do nothing clean shutdown
 		case err != nil:
 			log.Printf("p2p: connection %s closed: %v", remoteAddr, err)
 		}
@@ -335,7 +389,13 @@ func (t *TCPTransport) handleConn(conn net.Conn, outbound bool) {
 		return
 	}
 
-	if err = t.onPeer(peer); err != nil {
+	var perr error
+	if call("OnPeer", func() { perr = onPeer(peer) }) {
+		err = errors.New("OnPeer panicked")
+		return
+	}
+	if perr != nil {
+		err = perr
 		return
 	}
 	accepted = true

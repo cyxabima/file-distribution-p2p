@@ -22,4 +22,6 @@ type Transport interface {
 	SetOnPeerDisconnect(func(net.Addr))
 	Addr() net.Addr
 	Close() error
+	// Wait blocks until Close has finished tearing the transport down.
+	Wait()
 }
