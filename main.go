@@ -18,17 +18,18 @@ func main() {
 		HandshakeFunc: p2p.NOPHandshakeFunc,
 	}
 
-	tr := p2p.NewTcpTransport(tcpOpts)
+	tr, err := p2p.NewTCPTransport(tcpOpts)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	go func() {
-		for {
-			msg := <-tr.Consume()
+		for msg := range tr.Consume() {
 			fmt.Printf("%+v\n", msg)
 		}
 	}()
 
-	err := tr.ListenAndAccept()
-	if err != nil {
+	if err := tr.ListenAndAccept(); err != nil {
 		log.Fatal(err)
 	}
 

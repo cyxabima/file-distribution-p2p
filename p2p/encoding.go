@@ -25,7 +25,6 @@ type Decoder interface {
 	Decode(r io.Reader) ([]byte, error)
 }
 
-
 type LengthEncoder struct {
 	MaxMessageSize uint32
 }

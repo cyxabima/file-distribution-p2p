@@ -99,17 +99,24 @@ func (app *FileShareApp) handlePiece(peer p2p.Peer, data []byte) error {
 	return nil
 }
 
-// TODO: Mueed Bhai
-func (app *FileShareApp) RequestBlueprint(peer p2p.Peer) error
-func (app *FileShareApp) handleGetBlueprint(peer p2p.Peer) error
-func (app *FileShareApp) handleBlueprint(peer p2p.Peer, rawJSON []byte) error
+// TODO: (Mueed Bhai): implement the blueprint exchange.
+func (app *FileShareApp) RequestBlueprint(peer p2p.Peer) error {
+	return fmt.Errorf("RequestBlueprint: not implemented")
+}
 
+func (app *FileShareApp) handleGetBlueprint(peer p2p.Peer) error {
+	return fmt.Errorf("handleGetBlueprint: not implemented")
+}
+
+func (app *FileShareApp) handleBlueprint(peer p2p.Peer, rawJSON []byte) error {
+	return fmt.Errorf("handleBlueprint: not implemented")
+}
 
 func (app *FileShareApp) sendBitfield(peer p2p.Peer) error {
 	app.mu.RLock()
 	defer app.mu.RUnlock()
 
-	// GURAD if we havenot loaded a .p2p blueprint yet, we have no bitfield to send
+	// GURAD if we havenot loaded a .p2p blueprint yet so we have no bitfield to send
 	if app.state == nil {
 		return nil
 	}
@@ -127,4 +134,3 @@ func (app *FileShareApp) sendBitfield(peer p2p.Peer) error {
 
 	return peer.Send(payload)
 }
-

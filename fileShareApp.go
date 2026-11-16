@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -13,46 +14,54 @@ import (
 type FileShareApp struct {
 	listenAddr string
 	storageDir string
-	swarm    *p2p.SwarmManager
-	state    *ApplicationState
-	disk     *DiskManger
-	verifier *DataVerifier
-	mu       sync.RWMutex
+	swarm      *p2p.SwarmManager
+	state      *ApplicationState
+	disk       *DiskManger
+	verifier   *DataVerifier
+	mu         sync.RWMutex
 }
 
-func NewFileShareApp(listenAddr, storageDir string) (*FileShareApp) {
+func NewFileShareApp(listenAddr, storageDir string) (*FileShareApp, error) {
 	app := FileShareApp{
 		listenAddr: listenAddr,
 		storageDir: storageDir,
 	}
 
-
-	transport := p2p.NewTcpTransport(p2p.TCPTransportOpts{
+	// Encoder/Decoder are left unset on purpose as our p2p lib has the built-in length-prefixed
+	transport, err := p2p.NewTCPTransport(p2p.TCPTransportOpts{
 		ListenAddr:    listenAddr,
-		Encoder:       p2p.LengthEncoder{},
-		Decoder:       p2p.LengthDecoder{},
 		HandshakeFunc: ProtocolHandshake,
 	})
+	if err != nil {
+		return nil, err
+	}
 
-	app.swarm = p2p.NewSwarmManager(p2p.SwarmManagerOpts{
-		Transport: transport,
-		OnMessage: app.onMessage, // for wiring incoming network
-		OnPeerConnect: app.OnPeerConnect,
+	swarm, err := p2p.NewSwarmManager(p2p.SwarmManagerOpts{
+		Transport:        transport,
+		OnMessage:        app.onMessage, // for wiring incoming network
+		OnPeerConnect:    app.OnPeerConnect,
 		OnPeerDisconnect: app.OnPeerDisconnect,
 	})
+	if err != nil {
+		return nil, err
+	}
+	app.swarm = swarm
 
-	return &app
+	return &app, nil
 }
 
 func (app *FileShareApp) Start() {
 	// Start the network listening loop
-	go app.swarm.Start()
+	go func() {
+		if err := app.swarm.Start(); err != nil {
+			log.Printf("file share app: swarm stopped: %v", err)
+		}
+	}()
 
 	// Start the background download strategy loop
 	totalChunks := uint32(len(app.verifier.expectedHashes))
 	go app.StartRequestEngine(totalChunks)
 }
-
 
 // OnMessage is called by the SwarmManager whenever a complete message arrives
 func (app *FileShareApp) onMessage(msg p2p.Message) error {
@@ -77,7 +86,7 @@ func (app *FileShareApp) onMessage(msg p2p.Message) error {
 	}
 }
 
-func (app *FileShareApp) OnPeerConnect(peer p2p.Peer) error{
+func (app *FileShareApp) OnPeerConnect(peer p2p.Peer) error {
 	app.mu.RLock()
 	state := app.state
 	app.mu.RUnlock()
@@ -88,16 +97,17 @@ func (app *FileShareApp) OnPeerConnect(peer p2p.Peer) error{
 		return nil
 	}
 
-	return app.sendBitfield(peer)}
+	return app.sendBitfield(peer)
+}
 
-//we need this as swarm manager can not update app state
-func (app *FileShareApp) OnPeerDisconnect(addr net.Addr){
+// we need this as swarm manager can not update app state
+func (app *FileShareApp) OnPeerDisconnect(addr net.Addr) {
 	app.mu.RLock()
 	state := app.state
 	app.mu.RUnlock()
-	 if state != nil{
-	 state.RemovePeer(addr)
-	 }
+	if state != nil {
+		state.RemovePeer(addr)
+	}
 }
 
 func (app *FileShareApp) StartRequestEngine(totalChunks uint32) {
@@ -130,8 +140,6 @@ func (app *FileShareApp) StartRequestEngine(totalChunks uint32) {
 		peer.Send(payload)
 	}
 }
-
-
 
 // NOTE : Refactoring Requied as we need to handle multiple file sharing as once for that we need each file blueprint hash as well for session or other things ig
 // In V1 we are supporting one file at a time this will help us to keep away from session managmnet now

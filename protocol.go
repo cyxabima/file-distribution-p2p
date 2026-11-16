@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+
 	"github.com/cyxabima/minimal-p2p-library-in-go/p2p"
 )
 
@@ -17,20 +18,26 @@ const (
 
 var MagicProtocolString = []byte("COMPSTEMS_P2P_V1")
 
+// ProtocolHandshake exchanges the magic string with the remote peer
 func ProtocolHandshake(peer p2p.Peer) error {
-	dec := p2p.LengthDecoder{}
 	if err := peer.Send(MagicProtocolString); err != nil {
 		return err
 	}
 
-	var msg p2p.Message
-	if err := dec.Decode(peer, &msg); err != nil {
+	payload, err := peer.Receive()
+	if err != nil {
 		return err
 	}
 
-	if !bytes.Equal(msg.Payload, MagicProtocolString) {
+	if !bytes.Equal(payload, MagicProtocolString) {
 		return fmt.Errorf("invalid protocol handshake from %s", peer.RemoteAddr())
 	}
 
 	return nil
 }
+
+
+//  NOTE:
+// The handshake is symmetric:
+// both sides write their magic first and then read the peers
+// Writing first is required, because both nodes run this same function and reading first would make them wait on each other forever
