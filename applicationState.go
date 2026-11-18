@@ -32,6 +32,17 @@ func (s *ApplicationState) SetPeerBitfields(addr net.Addr, bitfield *Bitfield) {
 	s.peerBitfields[addr] = bitfield
 }
 
+// UpdatePeerBitfield marks one chunk as available on one peer. Callers must
+// not reach into s.mu or peerBitfields directly.
+func (s *ApplicationState) UpdatePeerBitfield(addr net.Addr, index uint32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if peerBf, exists := s.peerBitfields[addr]; exists {
+		peerBf.Set(index)
+	}
+}
+
 // Mark a chunk as requested so we donot ask for it twice
 func (s *ApplicationState) MarkInFlight(index uint32, addr net.Addr) {
 	s.mu.Lock()
@@ -42,7 +53,9 @@ func (s *ApplicationState) MarkInFlight(index uint32, addr net.Addr) {
 	}
 }
 func (s *ApplicationState) ClearInFlight(index uint32) {
-	// TODO: error handling here
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	delete(s.inFlight, index)
 }
 
@@ -81,7 +94,9 @@ func (s *ApplicationState) FindNextRequest(totalChunks uint32) (uint32, net.Addr
 	// Start with the maximum possible integer
 	minAvailability := int(^uint(0) >> 1)
 
-	for i := uint32(0); i <= totalChunks; i++ {
+	// Valid chunk indexes are 0..totalChunks-1. The old <= asked for one
+	// chunk that never existed.
+	for i := uint32(0); i < totalChunks; i++ {
 
 		// skip if already have chunk
 		if s.MyBitfield.Has(i) {
