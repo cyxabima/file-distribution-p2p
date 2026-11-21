@@ -2,7 +2,6 @@ package p2p
 
 import (
 	"errors"
-	"log"
 	"net"
 	"sync"
 )
@@ -13,18 +12,25 @@ type SwarmManagerOpts struct {
 	// These callbacks let the application do whatever it wants with peers.
 	OnPeerConnect    func(Peer) error
 	OnPeerDisconnect func(net.Addr)
+
+	// Logger receives swarm diagnostics. Defaults to log.Default().
+	Logger Logger
 }
 
 type SwarmManager struct {
 	SwarmManagerOpts
 	peerLock sync.RWMutex
 	peers    map[net.Addr]Peer
+
+	// loggerMu guards Logger because SetLogger may be called after Start.
+	loggerMu sync.RWMutex
 }
 
 func NewSwarmManager(opts SwarmManagerOpts) (*SwarmManager, error) {
 	if opts.Transport == nil {
 		return nil, errors.New("p2p: SwarmManager requires a Transport")
 	}
+	opts.Logger = loggerOr(opts.Logger)
 
 	sw := &SwarmManager{
 		SwarmManagerOpts: opts,
@@ -35,6 +41,28 @@ func NewSwarmManager(opts SwarmManagerOpts) (*SwarmManager, error) {
 	sw.Transport.SetOnPeerDisconnect(sw.handlePeerDisconnect)
 
 	return sw, nil
+}
+
+// logf snapshots the current logger under a lock.
+func (sm *SwarmManager) logf(format string, args ...any) {
+	sm.loggerMu.RLock()
+	l := sm.Logger
+	sm.loggerMu.RUnlock()
+	l.Printf(format, args...)
+}
+
+// SetLogger redirects swarm diagnostics and, when the transport supports it,
+// the transport's diagnostics too. It is safe to call after Start.
+func (sm *SwarmManager) SetLogger(l Logger) {
+	l = loggerOr(l)
+
+	sm.loggerMu.Lock()
+	sm.Logger = l
+	sm.loggerMu.Unlock()
+
+	if ls, ok := sm.Transport.(interface{ SetLogger(Logger) }); ok {
+		ls.SetLogger(l)
+	}
 }
 
 func (sm *SwarmManager) handleNewPeer(peer Peer) error {
@@ -50,7 +78,7 @@ func (sm *SwarmManager) handleNewPeer(peer Peer) error {
 
 	// Contain a panicking callback here cuz we have to remove the peer from the peer map if onPeerConnect failed
 	var err error
-	if call("OnPeerConnect", func() { err = sm.OnPeerConnect(peer) }) {
+	if call(sm.logf, "OnPeerConnect", func() { err = sm.OnPeerConnect(peer) }) {
 		err = errors.New("p2p: OnPeerConnect panicked")
 	}
 	if err != nil {
@@ -71,7 +99,7 @@ func (sm *SwarmManager) handlePeerDisconnect(addr net.Addr) {
 	sm.removePeer(addr)
 
 	if sm.OnPeerDisconnect != nil {
-		call("OnPeerDisconnect", func() { sm.OnPeerDisconnect(addr) })
+		call(sm.logf, "OnPeerDisconnect", func() { sm.OnPeerDisconnect(addr) })
 	}
 }
 
@@ -103,7 +131,7 @@ func (sm *SwarmManager) Broadcast(payload []byte) {
 	for _, peer := range peers {
 		go func(peer Peer) {
 			if err := peer.Send(payload); err != nil {
-				log.Printf("p2p: broadcast to %s failed: %v", peer.RemoteAddr(), err)
+				sm.logf("p2p: broadcast to %s failed: %v", peer.RemoteAddr(), err)
 			}
 		}(peer)
 	}
@@ -121,7 +149,7 @@ func (sm *SwarmManager) Start() error {
 
 	for msg := range sm.Transport.Consume() {
 		var err error
-		if call("OnMessage", func() { err = sm.OnMessage(msg) }) {
+		if call(sm.logf, "OnMessage", func() { err = sm.OnMessage(msg) }) {
 			// Already logged with a stack trace; keep the swarm alive.
 			continue
 		}
@@ -130,7 +158,7 @@ func (sm *SwarmManager) Start() error {
 			if errors.Is(err, net.ErrClosed) {
 				return nil
 			}
-			log.Printf("p2p: message from %s failed: %v", msg.From, err)
+			sm.logf("p2p: message from %s failed: %v", msg.From, err)
 		}
 	}
 

@@ -4,11 +4,22 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/cyxabima/minimal-p2p-library-in-go/p2p"
 )
+
+// progress derives UI counters from the current session.
+func (app *FileShareApp) progress(sess fileSession) (done, total uint32) {
+	if sess.verifier == nil {
+		return 0, 0
+	}
+	total = uint32(len(sess.verifier.expectedHashes))
+	if sess.state != nil {
+		done = sess.state.MyBitfield.Count()
+	}
+	return done, total
+}
 
 // handleBitfield processes the initial state dump from a new peer
 func (app *FileShareApp) handleBitfield(peer p2p.Peer, data []byte) error {
@@ -86,7 +97,19 @@ func (app *FileShareApp) handleRequest(peer p2p.Peer, data []byte) error {
 	binary.BigEndian.PutUint32(payload[1:5], chunkIndex)
 	copy(payload[5:], chunkData)
 
-	return peer.Send(payload)
+	if err := peer.Send(payload); err != nil {
+		return err
+	}
+
+	infoHash, fileName := fileInfo(sess)
+	app.emit(Event{
+		Type:       PieceServed,
+		InfoHash:   infoHash,
+		FileName:   fileName,
+		PeerAddr:   peerAddrString(peer),
+		ChunkIndex: chunkIndex,
+	})
+	return nil
 }
 
 // handlePiece processes the actual file data sent by a peer
@@ -116,6 +139,35 @@ func (app *FileShareApp) handlePiece(peer p2p.Peer, data []byte) error {
 
 	sess.state.MyBitfield.Set(chunkIndex)
 	sess.state.ClearInFlight(chunkIndex)
+
+	done, total := app.progress(sess)
+	infoHash, fileName := fileInfo(sess)
+	app.emit(Event{
+		Type:        ChunkDownloaded,
+		InfoHash:    infoHash,
+		FileName:    fileName,
+		PeerAddr:    peerAddrString(peer),
+		ChunkIndex:  chunkIndex,
+		ChunksDone:  done,
+		ChunksTotal: total,
+	})
+
+	// Fire completion once per session, not on every duplicate piece.
+	app.mu.Lock()
+	complete := total > 0 && done >= total && !app.downloadDone
+	if complete {
+		app.downloadDone = true
+	}
+	app.mu.Unlock()
+	if complete {
+		app.emit(Event{
+			Type:        DownloadComplete,
+			InfoHash:    infoHash,
+			FileName:    fileName,
+			ChunksDone:  done,
+			ChunksTotal: total,
+		})
+	}
 
 	// Most Import broadcast to eveyone that i have now this chuck
 	havePayload := make([]byte, 5)
@@ -202,7 +254,7 @@ func (app *FileShareApp) handleBlueprint(peer p2p.Peer, rawJSON []byte) error {
 		_ = disk.Close()
 		return err
 	}
-	installed, err := app.setBlueprint(&b, disk, false, true)
+	installed, err := app.setBlueprint(&b, disk, false, true, addr.String())
 	if err != nil {
 		_ = disk.Close()
 		return err
@@ -213,7 +265,7 @@ func (app *FileShareApp) handleBlueprint(peer p2p.Peer, rawJSON []byte) error {
 		return nil
 	}
 
-	log.Printf("file share app: loaded blueprint %s (%s, %d bytes, %d chunks) from %s",
+	app.logf("file share app: loaded blueprint %s (%s, %d bytes, %d chunks) from %s",
 		b.InfoHash, b.FileName, b.FileSize, len(b.Hashes), addr)
 
 	return app.sendBitfield(peer)

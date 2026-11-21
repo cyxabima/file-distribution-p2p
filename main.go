@@ -102,10 +102,15 @@ func main() {
 		log.Fatalf("chunk size must be between 1 and %d bytes", MaxChunkSize)
 	}
 
+	// One logger for the whole process; a TUI can replace this with a discard
+	// or file logger before doing anything else.
+	logger := loggerOr(nil)
+
 	app, err := NewFileShareApp(*listen, *storage)
 	if err != nil {
 		log.Fatal(err)
 	}
+	app.SetLogger(logger)
 
 	if *seedPath != "" {
 		b, err := app.LoadSeedFile(*seedPath, uint32(*chunkSize))
@@ -132,6 +137,7 @@ func main() {
 	if *useDiscovery {
 		announceAddr := dialableAddr(*listen, nil)
 		discovery = NewUDPDiscovery(announceAddr, 3*time.Second)
+		discovery.SetLogger(logger)
 
 		if *seedPath != "" {
 			if b := app.session().blueprint; b != nil {
@@ -159,10 +165,10 @@ func main() {
 		discovery.Stop()
 		discovery.Wait()
 	}
-	if err := app.swarm.Stop(); err != nil {
-		log.Printf("stop swarm: %v", err)
+	if err := app.Stop(); err != nil {
+		log.Printf("stop app: %v", err)
 	}
-	app.swarm.Wait()
+	app.Wait()
 }
 
 // connectLoop keeps trying one manually supplied peer until it connects or

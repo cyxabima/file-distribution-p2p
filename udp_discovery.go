@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -55,6 +54,10 @@ type UDPDiscovery struct {
 	done     chan struct{}
 	stopOnce sync.Once
 
+	// loggerMu allows SetLogger to be called while the background jobs run.
+	loggerMu sync.RWMutex
+	logger   Logger
+
 	wg          sync.WaitGroup
 	peersClosed chan struct{}
 }
@@ -73,7 +76,25 @@ func NewUDPDiscovery(announceAddr string, interval time.Duration) *UDPDiscovery 
 		registry:     NewRegistry(),
 		done:         make(chan struct{}),
 		peersClosed:  make(chan struct{}),
+		logger:       loggerOr(nil),
 	}
+}
+
+// SetLogger redirects discovery diagnostics. It is safe to call after Start.
+func (d *UDPDiscovery) SetLogger(l Logger) {
+	d.loggerMu.Lock()
+	d.logger = loggerOr(l)
+	d.loggerMu.Unlock()
+}
+
+func (d *UDPDiscovery) snapshotLogger() Logger {
+	d.loggerMu.RLock()
+	defer d.loggerMu.RUnlock()
+	return d.logger
+}
+
+func (d *UDPDiscovery) logf(format string, args ...any) {
+	d.snapshotLogger().Printf(format, args...)
 }
 
 func (d *UDPDiscovery) SetFiles(files []FileStub) {
@@ -131,7 +152,7 @@ func (d *UDPDiscovery) Start() error {
 		return fmt.Errorf("join multicast group: %w", err)
 	}
 	if err := conn.SetReadBuffer(maxPacketSize); err != nil {
-		log.Printf("discovery: set read buffer: %v", err)
+		d.logf("discovery: set read buffer: %v", err)
 	}
 
 	// A separate socket for sending avoids announcing from the listener's
@@ -148,7 +169,7 @@ func (d *UDPDiscovery) Start() error {
 
 	// ":3000" is a valid listen address but a useless announce address: it
 	// has no host. Fill in this machine's LAN IP once, here.
-	announceAddr := dialableAddr(d.AnnounceAddr, iface)
+	announceAddr := dialableAddrLogged(d.snapshotLogger(), d.AnnounceAddr, iface)
 
 	d.conn = conn
 	d.sendConn = sendConn
@@ -219,7 +240,7 @@ func (d *UDPDiscovery) listen(conn *net.UDPConn) {
 			if channelClosed(d.done) {
 				return // normal shutdown
 			}
-			log.Printf("discovery read: %v", err)
+			d.logf("discovery read: %v", err)
 
 			// One bad read must not end discovery forever.
 			select {
@@ -291,12 +312,12 @@ func (d *UDPDiscovery) announceOnce(conn *net.UDPConn, addr string) {
 		}
 		if len(payload) <= maxPacketSize {
 			if _, err := conn.Write(payload); err != nil && !channelClosed(d.done) {
-				log.Printf("discovery announce: %v", err)
+				d.logf("discovery announce: %v", err)
 			}
 			return
 		}
 
-		log.Printf("discovery: announcement too large, truncating from %d files", len(files))
+		d.logf("discovery: announcement too large, truncating from %d files", len(files))
 		files = files[:len(files)/2]
 	}
 }
@@ -322,6 +343,12 @@ func (d *UDPDiscovery) reap(interval time.Duration) {
 // dialableAddr replaces an empty or wildcard host with this machine's IPv4
 // address. The port is left untouched, so a fixed port still works.
 func dialableAddr(addr string, iface *net.Interface) string {
+	return dialableAddrLogged(loggerOr(nil), addr, iface)
+}
+
+// dialableAddrLogged is the same helper with an injectable logger, used by
+// Start so the warning obeys the app's logger too.
+func dialableAddrLogged(l Logger, addr string, iface *net.Interface) string {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return addr
@@ -337,7 +364,7 @@ func dialableAddr(addr string, iface *net.Interface) string {
 		return net.JoinHostPort(ip.String(), port)
 	}
 
-	log.Printf("discovery: cannot determine a local IP for %q; peers may not be able to dial it", addr)
+	l.Printf("discovery: cannot determine a local IP for %q; peers may not be able to dial it", addr)
 	return addr
 }
 

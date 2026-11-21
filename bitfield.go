@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math/bits"
 	"sync"
 )
 
@@ -63,6 +64,19 @@ func (bf *Bitfield) Clear(index uint32) {
 
 	// bitwise nand
 	bf.data[byteIndex] &^= 1 << bitOffset
+}
+
+// Count returns how many chunks we hold. The padding bits of the last byte are
+// never set by Set, so this matches the real chunk count.
+func (bf *Bitfield) Count() uint32 {
+	bf.mu.RLock()
+	defer bf.mu.RUnlock()
+
+	var n uint32
+	for _, b := range bf.data {
+		n += uint32(bits.OnesCount8(b))
+	}
+	return n
 }
 
 // Bytes returns a copy of the raw bitfield for sending over the wire.

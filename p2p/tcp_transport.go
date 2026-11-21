@@ -3,7 +3,6 @@ package p2p
 import (
 	"errors"
 	"io"
-	"log"
 	"net"
 	"runtime/debug"
 	"sync"
@@ -88,6 +87,9 @@ type TCPTransportOpts struct {
 	IdleTimeout      time.Duration
 	WriteTimeout     time.Duration
 	DialTimeout      time.Duration
+
+	// Logger receives transport diagnostics. Defaults to log.Default().
+	Logger Logger
 }
 
 func (o TCPTransportOpts) withDefaults() (TCPTransportOpts, error) {
@@ -114,6 +116,7 @@ func (o TCPTransportOpts) withDefaults() (TCPTransportOpts, error) {
 	if o.DialTimeout <= 0 {
 		o.DialTimeout = DefaultDialTimeout
 	}
+	o.Logger = loggerOr(o.Logger)
 
 	return o, nil
 }
@@ -133,20 +136,40 @@ type TCPTransport struct {
 	conns    map[net.Conn]struct{}
 	closed   bool
 
+	// loggerMu guards Logger because SetLogger may be called after Start.
+	loggerMu sync.RWMutex
+
 	done      chan struct{}
 	stopped   chan struct{}
 	closeOnce sync.Once
 	wg        sync.WaitGroup
 }
 
+// logf snapshots the current logger under a lock. Taking the function form
+// keeps call from holding a possibly-changing interface value.
+func (t *TCPTransport) logf(format string, args ...any) {
+	t.loggerMu.RLock()
+	l := t.Logger
+	t.loggerMu.RUnlock()
+	l.Printf(format, args...)
+}
+
+// SetLogger redirects transport diagnostics. It is safe to call after Start.
+func (t *TCPTransport) SetLogger(l Logger) {
+	t.loggerMu.Lock()
+	t.Logger = loggerOr(l)
+	t.loggerMu.Unlock()
+}
+
 // call runs fn and converts a panic into a logged error, so a buggy
 // application callback cannot take down the whole process. It reports whether
-// fn panicked.
-func call(name string, fn func()) (panicked bool) {
+// fn panicked. logf is supplied by the caller so the message reaches that
+// component's logger rather than the process-wide stderr.
+func call(logf func(string, ...any), name string, fn func()) (panicked bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			panicked = true
-			log.Printf("p2p: panic in %s: %v\n%s", name, r, debug.Stack())
+			logf("p2p: panic in %s: %v\n%s", name, r, debug.Stack())
 		}
 	}()
 
@@ -312,7 +335,7 @@ func (t *TCPTransport) startAcceptLoop(ln net.Listener) {
 			if errors.Is(err, net.ErrClosed) {
 				return
 			}
-			log.Printf("p2p: accept error: %v", err)
+			t.logf("p2p: accept error: %v", err)
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
@@ -368,14 +391,14 @@ func (t *TCPTransport) handleConn(conn net.Conn, outbound bool) {
 		t.untrackConn(conn)
 
 		if accepted {
-			call("OnPeerDisconnect", func() { onDisconnect(remoteAddr) })
+			call(t.logf, "OnPeerDisconnect", func() { onDisconnect(remoteAddr) })
 		}
 
 		switch {
 		case errors.Is(err, io.EOF), errors.Is(err, net.ErrClosed):
 			// Do nothing clean shutdown
 		case err != nil:
-			log.Printf("p2p: connection %s closed: %v", remoteAddr, err)
+			t.logf("p2p: connection %s closed: %v", remoteAddr, err)
 		}
 	}()
 
@@ -390,7 +413,7 @@ func (t *TCPTransport) handleConn(conn net.Conn, outbound bool) {
 	}
 
 	var perr error
-	if call("OnPeer", func() { perr = onPeer(peer) }) {
+	if call(t.logf, "OnPeer", func() { perr = onPeer(peer) }) {
 		err = errors.New("OnPeer panicked")
 		return
 	}
