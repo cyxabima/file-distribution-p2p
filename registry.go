@@ -36,9 +36,9 @@ type ClusterView struct {
 }
 
 type Registry struct {
-	mu       sync.RWMutex
-	clusters map[string]*Cluster
-	now      func() time.Time
+	mu         sync.RWMutex
+	clusters   map[string]*Cluster
+	now        func() time.Time
 	identities map[string]string
 }
 
@@ -120,7 +120,6 @@ func (r *Registry) RegisterAnnouncement(id, addr string, files []FileStub) {
 func (r *Registry) RegisterBlueprint(addr string, files []FileStub) {
 	r.RegisterAnnouncement(addr, addr, files)
 }
-
 
 // UnregisterBlueprint removes one peer from one file. If that was the last
 // peer, the whole cluster is deleted.

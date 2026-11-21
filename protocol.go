@@ -36,7 +36,6 @@ func ProtocolHandshake(peer p2p.Peer) error {
 	return nil
 }
 
-
 //  NOTE:
 // The handshake is symmetric:
 // both sides write their magic first and then read the peers

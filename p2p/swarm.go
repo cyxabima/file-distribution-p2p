@@ -92,7 +92,6 @@ func (sm *SwarmManager) RemovePeer(addr net.Addr) {
 	sm.handlePeerDisconnect(addr)
 }
 
-
 func (sm *SwarmManager) Broadcast(payload []byte) {
 	sm.peerLock.RLock()
 	peers := make([]Peer, 0, len(sm.peers))
