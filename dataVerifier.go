@@ -18,8 +18,7 @@ func NewDataVerifier(hashes [][]byte) *DataVerifier {
 }
 
 func (dv *DataVerifier) Verify(index uint32, data []byte) bool {
-
-	if index > uint32(len(dv.expectedHashes)) {
+	if dv == nil || index >= uint32(len(dv.expectedHashes)) {
 		return false
 	}
 

@@ -42,6 +42,9 @@ func (bf *Bitfield) Set(index uint32) {
 	defer bf.mu.Unlock()
 
 	byteIndex := index / 8
+	if byteIndex >= uint32(len(bf.data)) {
+		return // an index from the wire must never panic the app
+	}
 	bitOffset := index % 8
 
 	// bitwise Or to flip specifc bit to one
@@ -53,9 +56,21 @@ func (bf *Bitfield) Clear(index uint32) {
 	defer bf.mu.Unlock()
 
 	byteIndex := index / 8
+	if byteIndex >= uint32(len(bf.data)) {
+		return
+	}
 	bitOffset := index % 8
 
 	// bitwise nand
 	bf.data[byteIndex] &^= 1 << bitOffset
+}
 
+// Bytes returns a copy of the raw bitfield for sending over the wire.
+func (bf *Bitfield) Bytes() []byte {
+	bf.mu.RLock()
+	defer bf.mu.RUnlock()
+
+	out := make([]byte, len(bf.data))
+	copy(out, bf.data)
+	return out
 }
